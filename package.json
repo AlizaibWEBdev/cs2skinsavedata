@@ -1,6 +1,7 @@
 {
   "dependencies": {
     "dotenv": "^16.5.0",
+    "fuzzball": "^2.2.2",
     "googleapis": "^148.0.0",
     "telegraf": "^4.16.3",
     "xlsx": "^0.18.5"
