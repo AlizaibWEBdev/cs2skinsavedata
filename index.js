@@ -1,10 +1,10 @@
 const { Telegraf } = require('telegraf');
 const { google } = require('googleapis');
-const fuzzball = require('fuzzball'); // Add fuzzball for fuzzy matching
+const fuzzball = require('fuzzball');
 const credentials = require('./credentials.json');
 require('dotenv').config();
 
-// Initialize bot with environment variable
+// Initialize bot
 const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
 
 // Google Sheets setup
@@ -24,16 +24,18 @@ async function getSheetsClient() {
 const logSpreadsheetId = process.env.LOG_SPREADSHEET_ID;
 const skinsSpreadsheetId = process.env.SKIN_SPREADSHEET_ID;
 
-// Cache for skins list
+// Cache for skins
 let skinsCache = {
     list: [],
     lastUpdated: 0,
-    cacheDuration: 3600000 // 1 hour in ms
+    cacheDuration: 3600000 // 1 hour
 };
+
+// Hardcoded account names
+const accountOptions = ['Panda main', 'Panda_cs1', 'Titalium', 'Maleek'];
 
 // ================== CORE FUNCTIONS ================== //
 
-// Function to get the last log from the log spreadsheet
 async function getLastLog(sheets) {
     try {
         const response = await sheets.spreadsheets.values.get({
@@ -62,7 +64,6 @@ async function getLastLog(sheets) {
     }
 }
 
-// Function to append a log to the spreadsheet
 async function appendToSpreadsheet(skins, price, account, sheets) {
     try {
         const date = new Date().toISOString().split('T')[0];
@@ -81,10 +82,8 @@ async function appendToSpreadsheet(skins, price, account, sheets) {
     }
 }
 
-// Fetch skins list from Google Sheet with caching
 async function fetchSkinsList(sheets) {
     try {
-        // Return cached list if still valid
         if (skinsCache.list.length > 0 && Date.now() - skinsCache.lastUpdated < skinsCache.cacheDuration) {
             return skinsCache.list;
         }
@@ -93,25 +92,22 @@ async function fetchSkinsList(sheets) {
             spreadsheetId: skinsSpreadsheetId,
             range: 'Sheet1!A2:B',
         });
-        const skinsList = (response.data.values || []).map(row => row[0]).filter(Boolean);
+        const skinsList = (response.data.values || []).map(row => `${row[0]} ${row[1]}`).filter(Boolean);
 
-        // Update cache
         skinsCache.list = skinsList;
         skinsCache.lastUpdated = Date.now();
 
         return skinsList;
     } catch (error) {
         console.error('Error fetching skins list:', error);
-        // Fallback to cached list if available
         if (skinsCache.list.length > 0) {
-            console.warn('Using cached skins list due to error');
+            console.warn('Using cached skins list');
             return skinsCache.list;
         }
         throw new Error(`Failed to fetch skins list: ${error.message}`);
     }
 }
 
-// Fuzzy search for skins
 function searchSkins(skinsList, searchTerm) {
     const normalizedSearch = searchTerm.toLowerCase().replace(/[^a-z0-9\s]/g, '');
     return skinsList
@@ -122,14 +118,13 @@ function searchSkins(skinsList, searchTerm) {
                 skin.toLowerCase().replace(/[^a-z0-9\s]/g, '')
             )
         }))
-        .filter(result => result.score > 70) // Adjust threshold as needed
+        .filter(result => result.score > 70)
         .sort((a, b) => b.score - a.score)
         .map(result => result.name);
 }
 
 // ================== ENHANCED FEATURES ================== //
 
-// Statistics function (unchanged)
 async function getTradeStatistics(sheets) {
     try {
         const response = await sheets.spreadsheets.values.get({
@@ -176,7 +171,6 @@ async function getTradeStatistics(sheets) {
     }
 }
 
-// Recent trades function (unchanged)
 async function getRecentTrades(sheets, count = 5) {
     try {
         const response = await sheets.spreadsheets.values.get({
@@ -202,23 +196,8 @@ Account: ${row[5] || 'N/A'}`;
     }
 }
 
-// ================== CONSTANTS ================== //
-const wearOptions = [
-    'Factory New',
-    'Minimal Wear',
-    'Field-Tested',
-    'Well-Worn',
-    'Battle-Scarred',
-];
-
-const accountOptions = [
-    'Panda main',
-    'Panda_cs1',
-    'Titalium',
-    'Maleek'
-];
-
 // ================== SESSION MANAGEMENT ================== //
+
 const userSessions = {};
 
 function initializeSession(userId) {
@@ -227,10 +206,10 @@ function initializeSession(userId) {
             skins: [], 
             step: 'addSkin',
             timestamp: Date.now(),
-            search: { term: '', results: [], page: 0, pageSize: 5 } // Add pagination data
+            search: { term: '', results: [], page: 0, pageSize: 10 },
+            accountSearch: { page: 0, pageSize: 10 }
         };
         
-        // Cleanup old sessions
         Object.keys(userSessions).forEach(id => {
             if (Date.now() - userSessions[id].timestamp > 3600000) {
                 delete userSessions[id];
@@ -242,7 +221,6 @@ function initializeSession(userId) {
 
 // ================== COMMAND HANDLERS ================== //
 
-// Start command (unchanged)
 bot.start(async (ctx) => {
     try {
         const sheets = await getSheetsClient();
@@ -259,8 +237,6 @@ ${lastLog}
 /stats - Show trading statistics
 /recent - Show recent trades (last 5)
 /help - Show help information
-
-You can also use the buttons below to quickly access features.
 `, {
             reply_markup: {
                 inline_keyboard: [
@@ -279,7 +255,6 @@ You can also use the buttons below to quickly access features.
     }
 });
 
-// Price command (unchanged)
 bot.command('price', async (ctx) => {
     try {
         const sheets = await getSheetsClient();
@@ -296,7 +271,6 @@ bot.command('price', async (ctx) => {
     }
 });
 
-// Help command (unchanged)
 bot.command('help', (ctx) => {
     ctx.replyWithMarkdown(`
 *CS2 Skin Tracker Bot Help* 🆘
@@ -311,20 +285,13 @@ bot.command('help', (ctx) => {
 *How to log a trade:*
 1. Use /start or click "Add New Skin"
 2. Search for the skin name
-3. Select the wear condition
+3. Select the skin with wear
 4. Add more skins or finish
 5. Enter total price
 6. Select account
-
-*Features:*
-- Track all your CS2 skin trades
-- View trading statistics
-- Access your trade history
-- Multiple account support
 `);
 });
 
-// Stats command (unchanged)
 bot.command('stats', async (ctx) => {
     try {
         const sheets = await getSheetsClient();
@@ -344,7 +311,6 @@ bot.command('stats', async (ctx) => {
     }
 });
 
-// Recent trades command (unchanged)
 bot.command('recent', async (ctx) => {
     try {
         const sheets = await getSheetsClient();
@@ -367,15 +333,13 @@ bot.command('recent', async (ctx) => {
 
 // ================== ACTION HANDLERS ================== //
 
-// Handle "Add New Skin" button
 bot.action('add_new_skin', (ctx) => {
     const session = initializeSession(ctx.from.id);
     session.step = 'searchSkin';
-    session.search = { term: '', results: [], page: 0, pageSize: 5 }; // Reset search
+    session.search = { term: '', results: [], page: 0, pageSize: 10 };
     ctx.reply('🔍 Please type the name of the skin you want to add:');
 });
 
-// Handle "Show Stats" button (unchanged)
 bot.action('show_stats', async (ctx) => {
     try {
         const sheets = await getSheetsClient();
@@ -395,7 +359,6 @@ bot.action('show_stats', async (ctx) => {
     }
 });
 
-// Handle "Show Recent" button (unchanged)
 bot.action('show_recent', async (ctx) => {
     try {
         const sheets = await getSheetsClient();
@@ -416,7 +379,6 @@ bot.action('show_recent', async (ctx) => {
     }
 });
 
-// Handle "Show Help" button (unchanged)
 bot.action('show_help', (ctx) => {
     ctx.replyWithMarkdown(`
 *CS2 Skin Tracker Bot Help* 🆘
@@ -431,20 +393,13 @@ bot.action('show_help', (ctx) => {
 *How to log a trade:*
 1. Use /start or click "Add New Skin"
 2. Search for the skin name
-3. Select the wear condition
+3. Select the skin with wear
 4. Add more skins or finish
 5. Enter total price
 6. Select account
-
-*Features:*
-- Track all your CS2 skin trades
-- View trading statistics
-- Access your trade history
-- Multiple account support
 `);
 });
 
-// Handle pagination buttons
 bot.action(/page_(\d+)/, async (ctx) => {
     const session = initializeSession(ctx.from.id);
     const page = parseInt(ctx.match[1]);
@@ -466,11 +421,10 @@ bot.action(/page_(\d+)/, async (ctx) => {
             return ctx.reply('No more results to show.');
         }
 
-        const keyboard = pageSkins.map(skin => [
-            { text: skin, callback_data: `select_skin_${encodeURIComponent(skin)}` }
+        const keyboard = pageSkins.map((skin, index) => [
+            { text: skin, callback_data: `select_skin_${start + index}` }
         ]);
 
-        // Add pagination buttons
         const navButtons = [];
         if (page > 0) {
             navButtons.push({ text: '⬅️ Previous', callback_data: `page_${page - 1}` });
@@ -491,7 +445,43 @@ bot.action(/page_(\d+)/, async (ctx) => {
     }
 });
 
-// Handle skin search
+bot.action(/account_page_(\d+)/, async (ctx) => {
+    const session = initializeSession(ctx.from.id);
+    const page = parseInt(ctx.match[1]);
+    
+    try {
+        const start = page * session.accountSearch.pageSize;
+        const end = start + session.accountSearch.pageSize;
+        const pageAccounts = accountOptions.slice(start, end);
+
+        if (pageAccounts.length === 0) {
+            return ctx.reply('No more accounts to show.');
+        }
+
+        const keyboard = pageAccounts.map((account, index) => [
+            { text: account, callback_data: `select_account_${start + index}` }
+        ]);
+
+        const navButtons = [];
+        if (page > 0) {
+            navButtons.push({ text: '⬅️ Previous', callback_data: `account_page_${page - 1}` });
+        }
+        if (end < accountOptions.length) {
+            navButtons.push({ text: 'Next ➡️', callback_data: `account_page_${page + 1}` });
+        }
+        if (navButtons.length > 0) {
+            keyboard.push(navButtons);
+        }
+
+        await ctx.reply(`Select an account (Page ${page + 1} of ${Math.ceil(accountOptions.length / session.accountSearch.pageSize)}):`, {
+            reply_markup: { inline_keyboard: keyboard },
+        });
+    } catch (error) {
+        await ctx.reply('Error loading account page. Please try again later.');
+        console.error('Account pagination error:', error);
+    }
+});
+
 bot.on('text', async (ctx) => {
     const session = initializeSession(ctx.from.id);
     const text = ctx.message.text.trim();
@@ -509,11 +499,10 @@ bot.on('text', async (ctx) => {
             }
 
             const pageSkins = session.search.results.slice(0, session.search.pageSize);
-            const keyboard = pageSkins.map(skin => [
-                { text: skin, callback_data: `select_skin_${encodeURIComponent(skin)}` }
+            const keyboard = pageSkins.map((skin, index) => [
+                { text: skin, callback_data: `select_skin_${index}` }
             ]);
 
-            // Add "Next" button if there are more results
             if (session.search.results.length > session.search.pageSize) {
                 keyboard.push([{ text: 'Next ➡️', callback_data: 'page_1' }]);
             }
@@ -522,8 +511,8 @@ bot.on('text', async (ctx) => {
                 reply_markup: { inline_keyboard: keyboard },
             });
         } catch (error) {
-            await ctx.reply(`Error searching for skins: ${error.message}. Please try again later.`);
-            console.error('Skin search error:', error);
+            await ctx.reply('Error searching for skins. Please try again later.');
+            console.error('Skin search error:', error.message, error.stack);
         }
     } else if (session.step === 'enterPrice') {
         const price = parseFloat(text);
@@ -537,54 +526,44 @@ bot.on('text', async (ctx) => {
         session.price = price;
         session.step = 'selectAccount';
         
-        const keyboard = accountOptions.map(account => [
-            { text: account, callback_data: `select_account_${encodeURIComponent(account)}` }
-        ]);
-        
-        await ctx.reply('Select the account where the skin was traded:', {
-            reply_markup: { inline_keyboard: keyboard },
-        });
+        try {
+            const pageAccounts = accountOptions.slice(0, session.accountSearch.pageSize);
+            const keyboard = pageAccounts.map((account, index) => [
+                { text: account, callback_data: `select_account_${index}` }
+            ]);
+
+            if (accountOptions.length > session.accountSearch.pageSize) {
+                keyboard.push([{ text: 'Next ➡️', callback_data: 'account_page_1' }]);
+            }
+
+            await ctx.reply(`Select an account (Page 1 of ${Math.ceil(accountOptions.length / session.accountSearch.pageSize)}):`, {
+                reply_markup: { inline_keyboard: keyboard },
+            });
+        } catch (error) {
+            await ctx.reply('Error loading accounts. Please try again later.');
+            console.error('Account fetch error:', error);
+        }
     } else {
         await ctx.reply('Please use the menu buttons or type /start to begin.');
     }
 });
 
-// Handle skin selection (unchanged)
-bot.action(/select_skin_(.+)/, (ctx) => {
+bot.action(/select_skin_(\d+)/, (ctx) => {
     const session = initializeSession(ctx.from.id);
     try {
-        const skinName = decodeURIComponent(ctx.match[1]);
-        session.currentSkin = { name: skinName };
-        session.step = 'selectWear';
-
-        const keyboard = wearOptions.map(wear => [
-            { text: wear, callback_data: `select_wear_${encodeURIComponent(wear)}` }
-        ]);
-        
-        ctx.reply(`Selected skin: ${skinName}\nChoose the wear:`, {
-            reply_markup: { inline_keyboard: keyboard },
-        });
-    } catch (error) {
-        ctx.reply('Error processing your selection. Please try again.');
-        console.error('Skin selection error:', error);
-    }
-});
-
-// Handle wear selection (unchanged)
-bot.action(/select_wear_(.+)/, (ctx) => {
-    const session = initializeSession(ctx.from.id);
-    try {
-        const wear = decodeURIComponent(ctx.match[1]);
-        if (!wearOptions.includes(wear)) {
-            return ctx.reply('Invalid wear selection. Please try again.');
+        const index = parseInt(ctx.match[1]);
+        const skinFull = session.search.results[index];
+        if (!skinFull) {
+            return ctx.reply('Invalid skin selection. Please search again.');
         }
 
-        session.currentSkin.wear = wear;
-        session.skins.push(session.currentSkin);
-        delete session.currentSkin;
+        const parts = skinFull.split(' ');
+        const wear = parts.pop();
+        const name = parts.join(' ');
+        session.skins.push({ name, wear });
         session.step = 'addSkin';
 
-        ctx.reply(`Added ${wear} ${session.skins[session.skins.length - 1].name}.\nWhat would you like to do next?`, {
+        ctx.reply(`Added ${skinFull}.\nWhat would you like to do next?`, {
             reply_markup: {
                 inline_keyboard: [
                     [{ text: 'Add Another Skin', callback_data: 'add_new_skin' }],
@@ -593,12 +572,11 @@ bot.action(/select_wear_(.+)/, (ctx) => {
             },
         });
     } catch (error) {
-        ctx.reply('Error processing wear selection. Please try again.');
-        console.error('Wear selection error:', error);
+        ctx.reply('Error processing your selection. Please try again.');
+        console.error('Skin selection error:', error);
     }
 });
 
-// Handle finish log (unchanged)
 bot.action('finish_log', (ctx) => {
     const session = initializeSession(ctx.from.id);
     if (session.skins.length === 0) {
@@ -609,12 +587,12 @@ bot.action('finish_log', (ctx) => {
     ctx.reply('Please enter the total price you paid for these skins:');
 });
 
-// Handle account selection (unchanged)
-bot.action(/select_account_(.+)/, async (ctx) => {
+bot.action(/select_account_(\d+)/, async (ctx) => {
     const session = initializeSession(ctx.from.id);
     try {
-        const account = decodeURIComponent(ctx.match[1]);
-        if (!accountOptions.includes(account)) {
+        const index = parseInt(ctx.match[1]);
+        const account = accountOptions[index];
+        if (!account) {
             return ctx.reply('Invalid account selection. Please try again.');
         }
 
@@ -627,30 +605,31 @@ bot.action(/select_account_(.+)/, async (ctx) => {
             },
         });
         
-        // Reset session
-        userSessions[ctx.from.id] = { skins: [], step: 'addSkin', timestamp: Date.now(), search: { term: '', results: [], page: 0, pageSize: 5 } };
+        userSessions[ctx.from.id] = { 
+            skins: [], 
+            step: 'addSkin', 
+            timestamp: Date.now(), 
+            search: { term: '', results: [], page: 0, pageSize: 10 },
+            accountSearch: { page: 0, pageSize: 10 }
+        };
     } catch (error) {
         await ctx.reply('❌ Error saving log. Please try again.');
         console.error('Account selection error:', error);
     }
 });
 
-// Catch-all for unexpected messages
 bot.on('message', (ctx) => {
     ctx.reply('Please use /start to begin or use the menu buttons.');
 });
 
-// Error handling
 bot.catch((err, ctx) => {
     console.error('Bot error:', err);
-    ctx.reply('⚠️ An error occurred. Please try again or contact support if the problem persists.');
+    ctx.reply('⚠️ An error occurred. Please try again or contact support.');
 });
 
-// Start the bot
 bot.launch()
     .then(() => console.log('Bot is running...'))
     .catch(err => console.error('Bot launch failed:', err));
 
-// Graceful shutdown
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
